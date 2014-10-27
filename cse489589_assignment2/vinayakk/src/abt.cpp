@@ -60,38 +60,58 @@ const int A = 0;
 const int B = 1;
 pkt* last_sent_packet = NULL;
 pkt* last_received_packet = NULL;
+bool ack_received = true;
+const int PACKET_SIZE = 20;
+
+int Acount = 0;
+int Bcount = 0;
 
 /* Globals
  * Do NOT change the name/declaration of these variables
  * They are set to zero here. You will need to set them (except WINSIZE) to some proper values.
  * */
-float TIMEOUT = 20.0;
+float TIMEOUT = 50.0;
 //int WINSIZE ;        //Not applicable to ABT
 //int SND_BUFSIZE = 0; //Not applicable to ABT
 //int RCV_BUFSIZE = 0; //Not applicable to ABT
+
+int calc_checksum(pkt packet)
+{
+	int sum = 0;
+	for(int i = 0; i<PACKET_SIZE;i++)
+		sum += packet.payload[i];
+	sum += packet.acknum;
+	sum += packet.seqnum;
+	return sum;
+}
+
+pkt* copy_packet(pkt* source)
+{
+	pkt* dest = new pkt();
+	dest->checksum = source->checksum;
+	dest->seqnum = source->seqnum;
+	dest->acknum = source->acknum;
+	memcpy(dest->payload, source->payload, PACKET_SIZE);
+	return dest;
+}
 
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message) //ram's comment - students can change the return type of the function from struct to pointers if necessary
 {
 	A_application++;
-	int sum = 0;
-	message.data[19] = '\0';
-	std::string data(message.data);
+	if (!ack_received)
+		return;
 	int sequence =
 			(last_sent_packet == NULL) ? 0 : (1 - last_sent_packet->seqnum);
 	pkt packet;
-	for (int i = 0; i < data.length(); i++)
-		sum += data[i];
-	memcpy(packet.payload, data.c_str(), data.length());
-	packet.checksum = sum;
+	memcpy(packet.payload, message.data, PACKET_SIZE);
 	packet.seqnum = sequence;
+	packet.checksum = calc_checksum(packet);
 	tolayer3(A, packet);
+	ack_received = false;
 	if (last_sent_packet != NULL)
 		delete (last_sent_packet);
-	last_sent_packet = new pkt();
-	last_sent_packet->checksum = packet.checksum;
-	last_sent_packet->seqnum = packet.seqnum;
-	memcpy(last_sent_packet->payload, packet.payload, data.length());
+	last_sent_packet = copy_packet(&packet);
 	A_transport++;
 	starttimer(A, TIMEOUT);
 }
@@ -105,8 +125,9 @@ void B_output(struct msg message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-	if (last_sent_packet->seqnum == packet.acknum)
-		stoptimer(A);
+	stoptimer(A);
+	if (last_sent_packet->seqnum == packet.acknum && packet.checksum == calc_checksum(packet))
+		ack_received = true;
 	else
 	{
 		tolayer3(A, *last_sent_packet);
@@ -135,26 +156,23 @@ void A_init() //ram's comment - changed the return type to void.
 void B_input(struct pkt packet)
 {
 	B_transport++;
-	int checksum = 0;
 	char data[20];
 	if (last_received_packet != NULL && packet.seqnum == last_received_packet->seqnum)
+	{
+		tolayer3(B, *last_received_packet);
 		return;
-	int data_length = (sizeof(packet.payload) / sizeof(char));
-	memcpy(data, packet.payload, data_length);
-	for (int i = 0; i < data_length; i++)
-		checksum += data[i];
-	if (packet.checksum != checksum)
+	}
+	memcpy(data, packet.payload, PACKET_SIZE);
+	if (packet.checksum != calc_checksum(packet))
 		return;
 	tolayer5(B, data);
 	B_application++;
 	if (last_received_packet != NULL)
 		delete (last_received_packet);
-	last_received_packet = new pkt();
-	last_received_packet->checksum = packet.checksum;
-	last_received_packet->seqnum = packet.seqnum;
-	memcpy(last_received_packet->payload, packet.payload, data_length);
 	packet.acknum = packet.seqnum;
 	packet.payload[0] = '\0';
+	packet.checksum = calc_checksum(packet);
+	last_received_packet = copy_packet(&packet);
 	tolayer3(B, packet);
 }
 
@@ -167,14 +185,6 @@ void B_timerinterrupt() //ram's comment - changed the return type to void.
 /* entity B routines are called. You can use it to do any initialization */
 void B_init() //ram's comment - changed the return type to void.
 {
-}
-
-void copy_packet(pkt dest, pkt source)
-{
-	/*last_sent_packet = new pkt();
-	last_sent_packet->checksum = packet.checksum;
-	last_sent_packet->seqnum = packet.seqnum;
-	memcpy(last_sent_packet->payload, packet.payload, data.length());*/
 }
 
 int TRACE = 1; /* for my debugging */
