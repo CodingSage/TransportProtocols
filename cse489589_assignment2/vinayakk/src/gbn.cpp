@@ -69,8 +69,8 @@ pkt* last_received_packet = NULL;
  * */
 float TIMEOUT = 30.0;
 int WINSIZE; //This is supplied as cmd-line parameter; You will need to read this value but do NOT modify it's value;
-int SND_BUFSIZE = 100; //Sender's Buffer size
-int RCV_BUFSIZE = 100; //Receiver's Buffer size
+int SND_BUFSIZE = 1000; //Sender's Buffer size
+int RCV_BUFSIZE = 1000; //Receiver's Buffer size
 
 int calc_checksum(pkt packet)
 {
@@ -122,7 +122,7 @@ void B_output(struct msg message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-	if (packet.checksum != calc_checksum(packet))
+	if (packet.checksum != calc_checksum(packet) || packet.acknum < base_A || base_A == nextseq_A)
 		return;
 	if (((packet.acknum >= nextseq_A || packet.acknum < base_A) && base_A < nextseq_A)
 			|| (packet.acknum < base_A && packet.acknum > nextseq_A && nextseq_A < base_A))
@@ -136,8 +136,8 @@ void A_input(struct pkt packet)
 	}
 	stoptimer(A);
 	int i = base_A;
-	base_A = packet.acknum;
-	while (i <= base_A)
+	base_A = packet.acknum + 1;
+	while (i < base_A)
 	{
 		i++;
 		buffer_A.erase(buffer_A.begin());
