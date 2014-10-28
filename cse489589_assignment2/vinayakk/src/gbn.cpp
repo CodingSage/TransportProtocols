@@ -3,6 +3,8 @@
 #include <iostream>
 #include <getopt.h>
 #include <ctype.h>
+#include <cstring>
+#include <vector>
 /* ******************************************************************
  ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
 
@@ -38,6 +40,11 @@ struct pkt
 	char payload[20];
 };
 
+void tolayer3(int AorB, struct pkt packet);
+void tolayer5(int AorB, char *datasent);
+void starttimer(int AorB, float increment);
+void stoptimer(int AorB);
+
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
 
 /* Statistics 
@@ -49,19 +56,61 @@ int A_transport = 0;
 int B_application = 0;
 int B_transport = 0;
 
+int base_A = 0;
+int nextseq_A = 0;
+const int PACKET_SIZE = 20;
+const int A = 0;
+const int B = 1;
+std::vector<pkt> buffer_A;
+pkt* last_received_packet = NULL;
 /* Globals 
  * Do NOT change the name/declaration of these variables
  * They are set to zero here. You will need to set them (except WINSIZE) to some proper values.
  * */
-float TIMEOUT = 0.0;
+float TIMEOUT = 30.0;
 int WINSIZE; //This is supplied as cmd-line parameter; You will need to read this value but do NOT modify it's value;
-int SND_BUFSIZE = 0; //Sender's Buffer size
-int RCV_BUFSIZE = 0; //Receiver's Buffer size
+int SND_BUFSIZE = 100; //Sender's Buffer size
+int RCV_BUFSIZE = 100; //Receiver's Buffer size
+
+int calc_checksum(pkt packet)
+{
+	int sum = 0;
+	for (int i = 0; i < PACKET_SIZE; i++)
+		sum += packet.payload[i];
+	sum += packet.acknum;
+	sum += packet.seqnum;
+	return sum;
+}
+
+pkt* copy_packet(pkt* source)
+{
+	pkt* dest = new pkt();
+	dest->checksum = source->checksum;
+	dest->seqnum = source->seqnum;
+	dest->acknum = source->acknum;
+	memcpy(dest->payload, source->payload, PACKET_SIZE);
+	return dest;
+}
 
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message) //ram's comment - students can change the return type of the function from struct to pointers if necessary
 {
-
+	A_application++;
+	if (buffer_A.size() == SND_BUFSIZE)
+		return;
+	pkt packet;
+	memcpy(packet.payload, message.data, PACKET_SIZE);
+	packet.seqnum = nextseq_A;
+	packet.checksum = calc_checksum(packet);
+	buffer_A.push_back(packet);
+	nextseq_A = ++nextseq_A % SND_BUFSIZE;
+	if (buffer_A.size() <= WINSIZE)
+	{
+		tolayer3(A, packet);
+		A_transport++;
+	}
+	if (buffer_A.size() == 1)
+		starttimer(A, TIMEOUT);
 }
 
 void B_output(struct msg message) /* need be completed only for extra credit */
@@ -73,13 +122,38 @@ void B_output(struct msg message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-
+	if (packet.checksum != calc_checksum(packet))
+		return;
+	if (((packet.acknum >= nextseq_A || packet.acknum < base_A) && base_A < nextseq_A)
+			|| (packet.acknum < base_A && packet.acknum > nextseq_A && nextseq_A < base_A))
+	{
+		for (int i = 0; i < buffer_A.size() && i < WINSIZE; i++)
+		{
+			tolayer3(A, buffer_A[i]);
+			A_transport++;
+		}
+		return;
+	}
+	stoptimer(A);
+	int i = base_A;
+	base_A = packet.acknum;
+	while (i <= base_A)
+	{
+		i++;
+		buffer_A.erase(buffer_A.begin());
+	}
+	starttimer(A, TIMEOUT);
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt() //ram's comment - changed the return type to void.
 {
-
+	for (int i = 0; i < buffer_A.size() && i < WINSIZE; i++)
+	{
+		tolayer3(A, buffer_A[i]);
+		A_transport++;
+	}
+	starttimer(A, TIMEOUT);
 }
 
 /* the following routine will be called once (only) before any other */
@@ -93,6 +167,25 @@ void A_init() //ram's comment - changed the return type to void.
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
+	B_transport++;
+	if (packet.checksum != calc_checksum(packet))
+		return;
+	if (last_received_packet != NULL
+			&& !(packet.seqnum == last_received_packet->seqnum + 1
+					|| (packet.seqnum == 0 && last_received_packet->seqnum != 0)))
+	{
+		tolayer3(B, *last_received_packet);
+		return;
+	}
+	tolayer5(B, packet.payload);
+	B_application++;
+	if (last_received_packet != NULL)
+		delete (last_received_packet);
+	packet.acknum = packet.seqnum;
+	packet.payload[0] = '\0';
+	packet.checksum = calc_checksum(packet);
+	last_received_packet = copy_packet(&packet);
+	tolayer3(B, packet);
 }
 
 /* called when B's timer goes off */
