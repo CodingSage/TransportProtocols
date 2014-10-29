@@ -56,13 +56,13 @@ int A_transport = 0;
 int B_application = 0;
 int B_transport = 0;
 
-int base_A = 0;
-int nextseq_A = 0;
+int base_A = 0;						//senders buffer base of window
+int nextseq_A = 0;					//senders buffers next sequence not assigned to any packet
 const int PACKET_SIZE = 20;
 const int A = 0;
 const int B = 1;
-std::vector<pkt> buffer_A;
-pkt* last_received_packet = NULL;
+std::vector<pkt> buffer_A;			//senders packet buffer
+pkt* last_received_packet = NULL;	//receivers last sent ack packet buffer
 /* Globals 
  * Do NOT change the name/declaration of these variables
  * They are set to zero here. You will need to set them (except WINSIZE) to some proper values.
@@ -72,6 +72,7 @@ int WINSIZE; //This is supplied as cmd-line parameter; You will need to read thi
 int SND_BUFSIZE = 1000; //Sender's Buffer size
 int RCV_BUFSIZE = 1000; //Receiver's Buffer size
 
+//function for calculating checksum for a given packet
 int calc_checksum(pkt packet)
 {
 	int sum = 0;
@@ -82,6 +83,7 @@ int calc_checksum(pkt packet)
 	return sum;
 }
 
+//function for creating an copy of a given packet
 pkt* copy_packet(pkt* source)
 {
 	pkt* dest = new pkt();
@@ -103,7 +105,7 @@ void A_output(struct msg message) //ram's comment - students can change the retu
 	packet.seqnum = nextseq_A;
 	packet.checksum = calc_checksum(packet);
 	buffer_A.push_back(packet);
-	nextseq_A = ++nextseq_A % SND_BUFSIZE;
+	nextseq_A = ++nextseq_A % SND_BUFSIZE; //rotating sequence no. after buffer size
 	if (buffer_A.size() <= WINSIZE)
 	{
 		tolayer3(A, packet);
@@ -122,25 +124,34 @@ void B_output(struct msg message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-	if (packet.checksum != calc_checksum(packet) || packet.acknum < base_A || base_A == nextseq_A)
+	if (packet.checksum != calc_checksum(packet) || packet.acknum < base_A
+			|| base_A == nextseq_A)
 		return;
-	if (((packet.acknum >= nextseq_A || packet.acknum < base_A) && base_A < nextseq_A)
-			|| (packet.acknum < base_A && packet.acknum > nextseq_A && nextseq_A < base_A))
+	if (((packet.acknum >= nextseq_A || packet.acknum < base_A)
+			&& base_A < nextseq_A)
+			|| (packet.acknum < base_A && packet.acknum > nextseq_A
+					&& nextseq_A < base_A))
 	{
-		for (int i = 0; i < buffer_A.size() && i < WINSIZE; i++)
-		{
-			tolayer3(A, buffer_A[i]);
-			A_transport++;
-		}
+		/*for (int i = 0; i < buffer_A.size() && i < WINSIZE; i++)
+		 {
+		 tolayer3(A, buffer_A[i]);
+		 A_transport++;
+		 }*/
 		return;
 	}
 	stoptimer(A);
-	int i = base_A;
+	int oldbase = base_A;
 	base_A = packet.acknum + 1;
-	while (i < base_A)
-	{
-		i++;
+	for (int i = oldbase; i < base_A; i++)
 		buffer_A.erase(buffer_A.begin());
+	if (nextseq_A - oldbase >= WINSIZE)
+	{
+		int i = oldbase + WINSIZE; //TODO check this
+		while (i < base_A + WINSIZE && i < nextseq_A)
+		{
+			tolayer3(A, buffer_A[i]);
+			i++;
+		}
 	}
 	starttimer(A, TIMEOUT);
 }

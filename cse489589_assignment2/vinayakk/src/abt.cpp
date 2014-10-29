@@ -58,13 +58,10 @@ int B_transport = 0;
 
 const int A = 0;
 const int B = 1;
-pkt* last_sent_packet = NULL;
-pkt* last_received_packet = NULL;
-bool ack_received = true;
+pkt* last_sent_packet = NULL;		//single packet buffer on senders side
+pkt* last_received_packet = NULL;	//single packet buffer on receivers side
+bool ack_received = true;			//flag for ack status
 const int PACKET_SIZE = 20;
-
-int Acount = 0;
-int Bcount = 0;
 
 /* Globals
  * Do NOT change the name/declaration of these variables
@@ -75,6 +72,7 @@ float TIMEOUT = 50.0;
 //int SND_BUFSIZE = 0; //Not applicable to ABT
 //int RCV_BUFSIZE = 0; //Not applicable to ABT
 
+//function for calculating checksum for a given packet
 int calc_checksum(pkt packet)
 {
 	int sum = 0;
@@ -85,6 +83,7 @@ int calc_checksum(pkt packet)
 	return sum;
 }
 
+//function for creating an copy of a given packet
 pkt* copy_packet(pkt* source)
 {
 	pkt* dest = new pkt();
@@ -156,7 +155,7 @@ void A_init() //ram's comment - changed the return type to void.
 void B_input(struct pkt packet)
 {
 	B_transport++;
-	char data[20];
+	char data[PACKET_SIZE];
 	if (last_received_packet != NULL && packet.seqnum == last_received_packet->seqnum)
 	{
 		tolayer3(B, *last_received_packet);
