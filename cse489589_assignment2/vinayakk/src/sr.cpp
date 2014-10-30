@@ -4,7 +4,9 @@
 #include <getopt.h>
 #include <ctype.h>
 #include <cstring>
+#include <cmath>
 #include <vector>
+#include <algorithm>
 /* ******************************************************************
  ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
 
@@ -60,7 +62,7 @@ int B_transport = 0;
  * Do NOT change the name/declaration of these variables
  * They are set to zero here. You will need to set them (except WINSIZE) to some proper values.
  * */
-float TIMEOUT = 20.0;
+float TIMEOUT = 10.0;
 int WINSIZE; //This is supplied as cmd-line parameter; You will need to read this value but do NOT modify it;
 int SND_BUFSIZE = 1000; //Sender's Buffer size
 int RCV_BUFSIZE = 1000; //Receiver's Buffer size
@@ -77,42 +79,50 @@ std::vector<pkt> buffer_B(RCV_BUFSIZE);
 bool* ack_A;
 bool* ack_B;
 
+struct seq
+{
+	int seqnum;
+	float time;
+	seq(int seq, float time)
+	{
+		seqnum = seq;
+		this->time = time;
+	}
+};
+
+bool sort_seq(seq a, seq b)
+{
+	return a.time < b.time;
+}
+
 struct timer
 {
+	int index;
+	std::vector<seq> priority;
 	int entity;				  //A or B
-	int index;			//represents index of packet for which timer is running
-	float last_recorded_time; //last packets local time for calculating new packets relative time
-	std::vector<float> time; //represents all relative times of the packets within the window
+	float initial_time; //start time of the timer, acts as reference
 
 	timer(int entity)
 	{
 		index = 0;
-		last_recorded_time = 0;
+		initial_time = time_local;
 		this->entity = entity;
 	}
 
-	//adds a new packets relative time i.e time taken from addition of last packet to the
-	//addition of the current new packet, this way we can pass the time difference to the
-	//timer and simulate multiple timers as all timers will trigger in sequential order
-	void set_timer()
+	//Sets the timer for the new sequence no. which has been added to 'priority'
+	void set_timer(int sequence)
 	{
-		if (time.empty())
+		if (priority.empty())
 		{
-			last_recorded_time = time_local;
-			index = 0;
-			time.push_back(0);
+			priority.push_back(seq(sequence, 0));
 			starttimer(entity, TIMEOUT);
+			initial_time = time_local;
 			return;
 		}
-		float newtime = time_local - last_recorded_time;
-		last_recorded_time = time_local;
-		time.push_back(newtime);
-		float totaltime = 0;
-		for (int i = 1; i < time.size(); i++)
-			if (time[i] != -1)
-				totaltime += time[i];
-		//TODO check for large window size
-		//time[0] = TIMEOUT - totaltime;
+		int currseq = priority[index].seqnum;
+		int currtime = priority[index].time;
+		priority.push_back(seq(sequence, fmod((currtime + time_local - initial_time), TIMEOUT)));
+		std::sort(priority.begin(), priority.end(), sort_seq);
 	}
 
 	//increments index and passes the relative time for the next packet within the window
@@ -120,36 +130,47 @@ struct timer
 	void next_timer()
 	{
 		index++;
-		if (index == WINSIZE || index >= time.size())
+		if (index == priority.size())
 			index = 0;
-		if (time.empty())
+		if (priority.empty())
 			return;
-		while (time[index] != -1 && index < WINSIZE && index < time.size())
-			index++;
-		if (time[index] != -1)
-			starttimer(entity, time[index]);
+		else if (priority.size() == 1)
+			starttimer(entity, TIMEOUT);
+		else if (index == 0)
+			starttimer(entity, fmod(priority.end()->time + priority[index].time, TIMEOUT));
+		else
+			starttimer(entity, priority[index].time - priority[index - 1].time);
 	}
 
 	//sets the time for the particular element in the window to an invalid value
 	//so that the value is marked as ack'ed. removes all invalid values from base
 	//onwards so that new packet times can be captured
-	void stop_current()
+	void stop(int sequence)
 	{
-		stoptimer(entity);
-		float updatetime = time[index];
-		time[index] = -1;
-		for (int i = index + 1; i < time.size(); i++)
-			time[i] += updatetime;
-		while (time[0] == -1 && time.size() > 0)
-			time.erase(time.begin());
-		this->next_timer();
+		if (priority.size() == 1)
+		{
+			stoptimer(entity);
+			priority.erase(priority.begin());
+		}
+		else
+		{
+			int oldindex = -1;
+			for (int i = 0; i < priority.size(); i++)
+				if (priority[i].seqnum == sequence)
+					oldindex = i;
+			if (oldindex != -1)
+				priority.erase(priority.begin() + oldindex);
+		}
 	}
 
 	//returns vector of all seq within window for which timeout occurred
 	std::vector<int> get_timedout_seq()
 	{
 		std::vector<int> seq;
-		seq.push_back(index);
+		seq.push_back(priority[index].seqnum);
+		int i = index + 1;
+		while (priority[i].time - priority[i - 1].time == 0 && i < priority.size())
+			seq.push_back(priority[i].seqnum);
 		return seq;
 	}
 } timer_A(A);
@@ -202,7 +223,7 @@ void A_output(struct msg message) //ram's comment - students can change the retu
 	if (buffer_A.size() - base_A <= WINSIZE)
 	{
 		tolayer3(A, packet);
-		timer_A.set_timer();
+		timer_A.set_timer(packet.seqnum);
 		A_transport++;
 	}
 }
@@ -220,7 +241,7 @@ void A_input(struct pkt packet)
 	if (packet.checksum != calc_checksum(packet) || ack >= nextseq_A)
 		return;
 	//stop packets timer
-	timer_A.stop_current();
+	timer_A.stop(packet.seqnum);
 	ack_A[ack] = true;
 	int oldbase = base_A;
 	if (ack == base_A)
@@ -233,7 +254,7 @@ void A_input(struct pkt packet)
 		{
 			tolayer3(A, buffer_A[i]);
 			i++;
-			timer_A.set_timer();
+			timer_A.set_timer(buffer_A[i].seqnum);
 		}
 	}
 }
@@ -242,8 +263,10 @@ void A_input(struct pkt packet)
 void A_timerinterrupt() //ram's comment - changed the return type to void.
 {
 	std::vector<int> seq = timer_A.get_timedout_seq();
+	if (seq.empty())
+		return;
 	for (int i = 0; i < seq.size(); i++)
-		tolayer3(A, buffer_A[base_A + seq[i]]);
+		tolayer3(A, buffer_A[seq[i]]);
 	A_transport++;
 	timer_A.next_timer();
 }
@@ -261,7 +284,7 @@ void A_init() //ram's comment - changed the return type to void.
 void B_input(struct pkt packet)
 {
 	B_transport++;
-	if (packet.checksum != calc_checksum(packet))
+	if (packet.checksum != calc_checksum(packet) || packet.seqnum > base_B + WINSIZE)
 		return;
 	if (packet.seqnum < base_B || ack_B[packet.seqnum])
 	{
