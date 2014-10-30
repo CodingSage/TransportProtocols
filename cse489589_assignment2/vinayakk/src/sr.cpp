@@ -101,9 +101,11 @@ struct timer
 	std::vector<seq> priority;
 	int entity;				  //A or B
 	float initial_time; //start time of the timer, acts as reference
+	float last_run;
 
 	timer(int entity)
 	{
+		last_run = 0;
 		index = 0;
 		initial_time = time_local;
 		this->entity = entity;
@@ -121,25 +123,42 @@ struct timer
 		}
 		int currseq = priority[index].seqnum;
 		int currtime = priority[index].time;
-		priority.push_back(seq(sequence, fmod((currtime + time_local - initial_time), TIMEOUT)));
+		priority.push_back(seq(sequence, fmod((time_local - initial_time), TIMEOUT)));
 		std::sort(priority.begin(), priority.end(), sort_seq);
+		for (int i = 0; i < priority.size(); i++)
+			if (priority[i].seqnum == currseq)
+				index = i;
 	}
 
 	//increments index and passes the relative time for the next packet within the window
 	//to the timer
 	void next_timer()
 	{
-		index++;
-		if (index == priority.size())
-			index = 0;
+		float timeout;
 		if (priority.empty())
 			return;
-		else if (priority.size() == 1)
-			starttimer(entity, TIMEOUT);
-		else if (index == 0)
-			starttimer(entity, fmod(priority.end()->time + priority[index].time, TIMEOUT));
+		index++;
+		if (index >= priority.size())
+			index = 0;
+		if (index == 0)
+		{
+			timeout = TIMEOUT - priority[priority.size() - 1].time + priority[0].time;
+			starttimer(entity, timeout);
+			last_run = 0;
+		}
 		else
-			starttimer(entity, priority[index].time - priority[index - 1].time);
+		{
+			float time = last_run > priority[index - 1].time ? last_run : priority[index - 1].time;
+			timeout = priority[index].time - last_run;
+			starttimer(entity, timeout);
+			last_run = priority[index].time;
+		}
+		if(timeout <= 0)
+		{
+			int a = 1;
+			int b = 2;
+			return;
+		}
 	}
 
 	//sets the time for the particular element in the window to an invalid value
@@ -238,7 +257,7 @@ void B_output(struct msg message) /* need be completed only for extra credit */
 void A_input(struct pkt packet)
 {
 	int ack = packet.acknum;
-	if (packet.checksum != calc_checksum(packet) || ack >= nextseq_A)
+	if (packet.checksum != calc_checksum(packet) || ack >= nextseq_A || ack_A[ack])
 		return;
 	//stop packets timer
 	timer_A.stop(packet.seqnum);
