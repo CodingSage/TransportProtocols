@@ -97,10 +97,16 @@ bool sort_seq(seq a, seq b)
 
 struct timer
 {
+	//index of current timer execution
 	int index;
+	//vector of packets within the window
 	std::vector<seq> priority;
-	int entity;				  //A or B
-	float initial_time; //start time of the timer, acts as reference
+	//A or B
+	int entity;
+	//start time of the timer, acts as reference
+	float initial_time;
+	//variable storing the last reference time,
+	//used in case ack is received and packet is removed from array
 	float last_run;
 
 	timer(int entity)
@@ -111,7 +117,8 @@ struct timer
 		this->entity = entity;
 	}
 
-	//Sets the timer for the new sequence no. which has been added to 'priority'
+	//Sets the timer for the new sequence no. which has been added to 'priority'.
+	//Starts the timer for the first packet in the priority array
 	void set_timer(int sequence)
 	{
 		if (priority.empty())
@@ -131,7 +138,8 @@ struct timer
 	}
 
 	//increments index and passes the relative time for the next packet within the window
-	//to the timer
+	//to the timer. In case of first index, the time is calculated by taking the sum of
+	//the time left for timeout and the reference time of the first packet
 	void next_timer()
 	{
 		float timeout;
@@ -153,17 +161,10 @@ struct timer
 			starttimer(entity, timeout);
 			last_run = priority[index].time;
 		}
-		if(timeout <= 0)
-		{
-			int a = 1;
-			int b = 2;
-			return;
-		}
 	}
 
-	//sets the time for the particular element in the window to an invalid value
-	//so that the value is marked as ack'ed. removes all invalid values from base
-	//onwards so that new packet times can be captured
+	//removes the element for which the sequence is passed from the priority array.
+	//used when an ack has been received for a particular sequence no.
 	void stop(int sequence)
 	{
 		if (priority.size() == 1)
