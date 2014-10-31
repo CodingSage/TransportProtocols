@@ -78,6 +78,21 @@ std::vector<pkt> buffer_A;
 std::vector<pkt> buffer_B(RCV_BUFSIZE);
 bool* ack_A;
 bool* ack_B;
+//holds value of base sequence for maintaining count of no. of timeouts
+int tbaseseq = -1;
+//count for no. of timeouts for base packet
+int tcount = 0;
+//upper limit to which timeout can be increased
+const int TIMER_UPPER_LIMIT = 70;
+//count limit for the no. of timeouts for which a packet
+//can remain in the window before increasing the timeout
+int TIMER_PACKET_COUNT_LIMIT = 5;
+//amount by which the count is incremented on reaching the
+//TIMER_PACKET_COUNT_LIMIT limit
+const int TIMER_COUNT_INCREMENT = 5;
+//amount by which the timer is incremented on reaching the
+//TIMER_PACKET_COUNT_LIMIT limit
+const int TIMER_INCREMENT = 20;
 
 struct seq
 {
@@ -130,7 +145,8 @@ struct timer
 		}
 		int currseq = priority[index].seqnum;
 		int currtime = priority[index].time;
-		priority.push_back(seq(sequence, fmod((time_local - initial_time), TIMEOUT)));
+		priority.push_back(
+				seq(sequence, fmod((time_local - initial_time), TIMEOUT)));
 		std::sort(priority.begin(), priority.end(), sort_seq);
 		for (int i = 0; i < priority.size(); i++)
 			if (priority[i].seqnum == currseq)
@@ -150,13 +166,16 @@ struct timer
 			index = 0;
 		if (index == 0)
 		{
-			timeout = TIMEOUT - priority[priority.size() - 1].time + priority[0].time;
+			timeout = TIMEOUT - priority[priority.size() - 1].time
+					+ priority[0].time;
 			starttimer(entity, timeout);
 			last_run = 0;
 		}
 		else
 		{
-			float time = last_run > priority[index - 1].time ? last_run : priority[index - 1].time;
+			float time =
+					last_run > priority[index - 1].time ?
+							last_run : priority[index - 1].time;
 			timeout = priority[index].time - last_run;
 			starttimer(entity, timeout);
 			last_run = priority[index].time;
@@ -189,7 +208,8 @@ struct timer
 		std::vector<int> seq;
 		seq.push_back(priority[index].seqnum);
 		int i = index + 1;
-		while (priority[i].time - priority[i - 1].time == 0 && i < priority.size())
+		while (priority[i].time - priority[i - 1].time == 0
+				&& i < priority.size())
 		{
 			seq.push_back(priority[i].seqnum);
 			i++;
@@ -257,12 +277,30 @@ void B_output(struct msg message) /* need be completed only for extra credit */
 
 }
 
+//TODO refactor: similar conditions can be removed
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
 	int ack = packet.acknum;
-	if (packet.checksum != calc_checksum(packet) || ack >= nextseq_A || ack_A[ack])
+	if (packet.checksum != calc_checksum(packet) || ack >= nextseq_A
+			|| ack_A[ack])
 		return;
+	//TODO check timeout scheme here
+	/*if (ack != base_A && base_A != tbaseseq)
+	{
+		tbaseseq = base_A;
+		tcount = 0;
+	}
+	if (base_A == tbaseseq)
+	{
+		tcount++;
+		if (tcount >= TIMER_PACKET_COUNT_LIMIT && TIMEOUT < TIMER_UPPER_LIMIT)
+		{
+			TIMEOUT += TIMER_INCREMENT;
+			TIMER_PACKET_COUNT_LIMIT += TIMER_COUNT_INCREMENT;
+			printf("updating timer %f", TIMEOUT);
+		}
+	}*/
 	//stop packets timer
 	timer_A.stop(packet.seqnum);
 	ack_A[ack] = true;
@@ -270,14 +308,14 @@ void A_input(struct pkt packet)
 	if (ack == base_A)
 		while (ack_A[base_A])
 			base_A++;
-	if (nextseq_A - oldbase > WINSIZE)
+	if (nextseq_A - oldbase > WINSIZE && oldbase != base_A)
 	{
-		int i = oldbase + WINSIZE; //TODO check this
+		int i = oldbase + WINSIZE;
 		while (i < base_A + WINSIZE && i < nextseq_A)
 		{
 			tolayer3(A, buffer_A[i]);
-			i++;
 			timer_A.set_timer(buffer_A[i].seqnum);
+			i++;
 		}
 	}
 }
@@ -289,7 +327,25 @@ void A_timerinterrupt() //ram's comment - changed the return type to void.
 	if (seq.empty())
 		return;
 	for (int i = 0; i < seq.size(); i++)
+	{
 		tolayer3(A, buffer_A[seq[i]]);
+		if (seq[i] == base_A && base_A != tbaseseq)
+		{
+			tbaseseq = base_A;
+			tcount = 0;
+		}
+		if (seq[i] == tbaseseq)
+		{
+			tcount++;
+			if (tcount >= TIMER_PACKET_COUNT_LIMIT
+					&& TIMEOUT < TIMER_UPPER_LIMIT)
+			{
+				TIMEOUT += TIMER_INCREMENT;
+				TIMER_PACKET_COUNT_LIMIT += TIMER_COUNT_INCREMENT;
+				printf("updating timer %f", TIMEOUT);
+			}
+		}
+	}
 	A_transport++;
 	timer_A.next_timer();
 }
@@ -307,7 +363,8 @@ void A_init() //ram's comment - changed the return type to void.
 void B_input(struct pkt packet)
 {
 	B_transport++;
-	if (packet.checksum != calc_checksum(packet) || packet.seqnum > base_B + WINSIZE)
+	if (packet.checksum != calc_checksum(packet)
+			|| packet.seqnum > base_B + WINSIZE)
 		return;
 	if (packet.seqnum < base_B || ack_B[packet.seqnum])
 	{
