@@ -190,7 +190,10 @@ struct timer
 		seq.push_back(priority[index].seqnum);
 		int i = index + 1;
 		while (priority[i].time - priority[i - 1].time == 0 && i < priority.size())
+		{
 			seq.push_back(priority[i].seqnum);
+			i++;
+		}
 		return seq;
 	}
 } timer_A(A);
