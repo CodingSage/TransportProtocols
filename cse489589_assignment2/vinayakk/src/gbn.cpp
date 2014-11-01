@@ -57,7 +57,7 @@ int B_application = 0;
 int B_transport = 0;
 
 int base_A = 0;						//senders buffer base of window
-int nextseq_A = 0;					//senders buffers next sequence not assigned to any packet
+int nextseq_A = 0;	//senders buffers next sequence not assigned to any packet
 const int PACKET_SIZE = 20;
 const int A = 0;
 const int B = 1;
@@ -67,7 +67,7 @@ pkt* last_received_packet = NULL;	//receivers last sent ack packet buffer
  * Do NOT change the name/declaration of these variables
  * They are set to zero here. You will need to set them (except WINSIZE) to some proper values.
  * */
-float TIMEOUT = 30.0;
+float TIMEOUT = 10.0;
 int WINSIZE; //This is supplied as cmd-line parameter; You will need to read this value but do NOT modify it's value;
 int SND_BUFSIZE = 1000; //Sender's Buffer size
 int RCV_BUFSIZE = 1000; //Receiver's Buffer size
@@ -127,16 +127,17 @@ void A_input(struct pkt packet)
 	if (packet.checksum != calc_checksum(packet) || packet.acknum < base_A
 			|| base_A == nextseq_A)
 		return;
+	//check for packet with incorrect sequence
 	if (((packet.acknum >= nextseq_A || packet.acknum < base_A)
 			&& base_A < nextseq_A)
 			|| (packet.acknum < base_A && packet.acknum > nextseq_A
 					&& nextseq_A < base_A))
 	{
 		/*for (int i = 0; i < buffer_A.size() && i < WINSIZE; i++)
-		 {
-		 tolayer3(A, buffer_A[i]);
-		 A_transport++;
-		 }*/
+		{
+			tolayer3(A, buffer_A[i]);
+			A_transport++;
+		}*/
 		return;
 	}
 	stoptimer(A);
@@ -153,7 +154,8 @@ void A_input(struct pkt packet)
 			i++;
 		}
 	}
-	starttimer(A, TIMEOUT);
+	if (!buffer_A.empty())
+		starttimer(A, TIMEOUT);
 }
 
 /* called when A's timer goes off */

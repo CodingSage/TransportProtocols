@@ -67,7 +67,7 @@ const int PACKET_SIZE = 20;
  * Do NOT change the name/declaration of these variables
  * They are set to zero here. You will need to set them (except WINSIZE) to some proper values.
  * */
-float TIMEOUT = 50.0;
+float TIMEOUT = 10.0;
 //int WINSIZE ;        //Not applicable to ABT
 //int SND_BUFSIZE = 0; //Not applicable to ABT
 //int RCV_BUFSIZE = 0; //Not applicable to ABT
